@@ -17,7 +17,7 @@ A or <img src="https://latex.codecogs.com/gif.latex?P_i(O_t):\text { transition 
 
 B or $$: The probability of observation $O_t$ at state i.
 
-$O = o_1, o_2, ..., o_T$: A sequence of observations
+$$O = o_1, o_2, ..., o_T$$: A sequence of observations
 
 $q_1, q_2, ... q_N$: Hidden states
 
