@@ -13,17 +13,17 @@ Let's discuss some of the basic concept in this area. As you know random variabl
 
 <b>Any HMMs contains a few key components that have to be defined:
 
-A or <img src="https://latex.codecogs.com/gif.latex?P_i(O_t):\text { transition probability matrix } " />
+A or <img src="<img src="https://render.githubusercontent.com/render/math?math=P_i(O_t)"/>: transition probability matrix
 
-B or $$: The probability of observation $O_t$ at state i.
+B or emission probabilities: The probability of observation $O_t$ at state i.
 
-$$O = o_1, o_2, ..., o_T$$: A sequence of observations
+O = o_1, o_2, ..., o_T: A sequence of observations
 
-$q_1, q_2, ... q_N$: Hidden states
+q_1, q_2, ... q_N: Hidden states
 
-$q_0$: initial state
+q_0: initial state
 
-$q_e$: Final state
+q_e: Final state
 
 </b>
 
