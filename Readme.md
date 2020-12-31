@@ -28,3 +28,8 @@ $q_e$: Final state
 </b>
 
 # 1. likelihood
+This is for the case that we are given a sequence of observation (O) and we would like to know the likelihood (P(O)) of this observation, assuming that we have learnt the hmm and we know both the matrixes A and B.
+
+If we knew the states of each observation time-step, then the calculation of likelihood would be as easy as pie. To better understand this, let's see an example (This is a well known example in this field).
+
+> Example: Imagine for the weather on each day we have two cases, but we don't have any clue what they mean, correspondingly we have some other observations that we are dealing with, e.g. the number of ice creams that have been eaten on that specific day. In this case a possible sequence of observation could be $3, 1, 3$ meaning that on three consecutive days the number of eaten ice creams have been 3 ,1 ,3 respectively. what we are interested in Likelihood problem is to calculate the probability of this sequence as P(3 1 3). If we knew the states behind the states it would be a lot easier for us to calculate the likelihood as p(3 1 3 | hot cold hot) = p(3|hot)p(1|cold)p(3|hot). Using this approach we could have calculated the joint probability P(3 1 3, hot cold hot) and after all the probability of observation would be the marginal probability of the joint probability. So we should have added all of the cases that we may have for the states. Since we have a sequence of three time-steps and 2 cases for each time-step, then we can conclude that the total number of cased is $2^3 = 8$. This is a problem since the growth in length will increase the number of the cases exponentially. To solve this we will use the forward algorithm.
