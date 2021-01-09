@@ -41,4 +41,4 @@ If we knew the states of each observation time-step, then the calculation of lik
 
 
 ## What is this project?
-In this project a sample dataset is provided, and learning will be accomplished in both a supervised and unsupervised manner. Afterwards given a sequence of observations the most probable cases for hidden states will be estimated(Decoding). 
+In this project a sample dataset is provided, and learning will be accomplished in both a supervised and unsupervised manner. Afterwards given a sequence of observations the most probable cases for hidden states will be estimated(Decoding).
