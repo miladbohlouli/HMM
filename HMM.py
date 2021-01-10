@@ -15,8 +15,7 @@ class hmm:
         self.bigram_states_dictionary = {}
         self.num_states = len(states)
         self.num_observations = None
-
-        self.__transition_probability = np.empty((self.num_states, self.num_states))
+        self.__transition_probability = None
         self.__emission_probabilities = None
 
     def supervised_training(self, x: np.ndarray, y: np.ndarray):
@@ -29,7 +28,8 @@ class hmm:
         """
         self.observation_dict = {key: value for value, key in enumerate(np.unique(x))}
         self.num_observations = len(self.observation_dict)
-        self.__emission_probabilities = np.empty((self.num_states, self.num_observations))
+        self.__emission_probabilities = np.zeros((self.num_states, self.num_observations))
+        self.__transition_probability = np.zeros((self.num_states, self.num_states))
         x = self.convert_numerical(x, self.observation_dict)
         y = self.convert_numerical(y, self.states_dict)
 
@@ -50,10 +50,11 @@ class hmm:
             for j in range(self.num_observations):
                 self.__emission_probabilities[i, j] = np.sum(np.logical_and(y == i, x == j)) / np.sum(y == i)
 
+
+
     # Todo:
     def unsupervised_training(self, x: np.ndarray):
         pass
-
     def viterbi(self, observation: list):
         """
         The Viterbi algorithm used for decoding the given observation to the sequence of probable states
@@ -92,7 +93,8 @@ class hmm:
 
     def likelihood(self, observation: list):
         """
-        The likelihood algorithm used for calculating the likelihodd of a provided sequence
+        The likelihood algorithm used for calculating the likelihood of a provided sequence, this algorithm is in
+            fact the forward algorithm which will be further used in  unsupervised_learning section.
         :param observation: The sequence of the observation as a list of the vocabs defined in the dataset
         :return: Returns the likelihood of the the provided sequence as a float number
         """
@@ -116,8 +118,29 @@ class hmm:
                 probability_matrix[next_state, i] = np.sum(temp)
 
         # Termination and calculating the likelihood
-        return np.sum((1 / self.num_states) * probability_matrix[:, -1])
+        return np.sum(probability_matrix[:, -1])
 
+    def backward(self, observation: list):
+        numerical_observation = self.convert_numerical(observation, self.observation_dict)
+
+        probability_matrix = np.zeros((self.num_states, len(observation) + 1))
+
+        # Initilization
+        probability_matrix[:, -1] = 1
+
+        # Recursion
+        for i in range(len(observation)-2, -1, -1):
+            for initial_state in range(self.num_states):
+                temp = np.zeros(self.num_states)
+                for next_state in range(self.num_states):
+                    temp[next_state] = probability_matrix[next_state, i + 1] * \
+                                       self.__transition_probability[initial_state, next_state] * \
+                                       self.__emission_probabilities[next_state, numerical_observation[i + 1]]
+
+                probability_matrix[initial_state, i] = np.sum(temp)
+
+        # Termination and calculating the backward probability
+        return np.sum((1 / self.num_states) * self.__emission_probabilities[:, numerical_observation[0]])
 
     @staticmethod
     def convert_states(numerical_sequence, dictionary):
@@ -154,8 +177,9 @@ if __name__ == '__main__':
     dataset = np.array(list(map(fix_data, lines)), dtype=object)
     states = ["foggy", "rainy", "sunny"]
     my_model = hmm(states)
-    my_model.unsupervised_training(dataset[:, 1])
-
+    # my_model.unsupervised_training(dataset[:, 1])
+    my_model.supervised_training(dataset[:, 1], dataset[:, 0])
+    print(my_model.backward(["yes"]))
 
 
 
