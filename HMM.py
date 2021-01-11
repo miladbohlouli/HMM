@@ -1,17 +1,18 @@
 import numpy as np
 import os
 from tqdm import tqdm
+from matplotlib import pyplot as plt
+import seaborn as sns
+sns.set(color_codes=True)
+
 np.set_printoptions(precision=4, suppress=True)
 
 class hmm:
     def __init__(self, initial_distribution:list = None):
         """
         The constructor of the hmm class
-        :param states: These are the set of the possible states
         :param initial_distribution: The initial_distribution for the given inputss
         """
-        # Converting the states to integers
-
         self.states_dict = {}
         self.observation_dict = {}
         self.bigram_states_dictionary = {}
@@ -20,6 +21,8 @@ class hmm:
         self.__transition_probability = None
         self.__emission_probabilities = None
         self.initial_distribution = initial_distribution
+        self.__transition_probability_ground_truth = None
+        self.__emission_probabilities_ground_truth = None
 
     def supervised_training(self, x: np.ndarray, y: np.ndarray):
         """
@@ -30,29 +33,18 @@ class hmm:
         :param y: The states in the dataset defined as the labels
 
         """
-        self.observation_dict = {key: value for value, key in enumerate(np.unique(x))}
-        self.num_states = len(states)
-        self.states_dict = {key: value for value, key in enumerate(np.unique(y))}
-        self.num_observations = len(self.observation_dict)
-        if self.initial_distribution is None:
-            self.initial_distribution = np.array([1 / self.num_states] * self.num_states)
-
+        self.__fill_parameters(np.unique(x), np.unique(y))
         self.__emission_probabilities = np.zeros((self.num_states, self.num_observations))
         self.__transition_probability = np.zeros((self.num_states, self.num_states))
+
         numerical_x = self.__convert_numerical(x, self.observation_dict)
         numerical_y = self.__convert_numerical(y, self.states_dict)
-        x, y = [], []
-        seq_len = 10
-
-        for i in range(len(numerical_x)-seq_len+1):
-            x.append(numerical_x[i:i + seq_len])
-            y.append(numerical_y[i:i + seq_len])
-        x = np.asarray(x)
-        y = np.asarray(y)
+        x = self.__build_sequences(numerical_x)
+        y = self.__build_sequences(numerical_y)
 
         # Forming the the bigram dictionary
         for seq in y:
-            for i in range(seq_len-1):
+            for i in range(len(seq)-1):
                 if (seq[i], seq[i+1]) not in self.bigram_states_dictionary:
                     self.bigram_states_dictionary[(seq[i], seq[i + 1])] = 1
                 else:
@@ -70,22 +62,27 @@ class hmm:
             for j in range(self.num_observations):
                 self.__emission_probabilities[i, j] = np.sum(np.logical_and(x == j, y == i)) / np.sum(y == i)
 
-    def unsupervised_training(self, x: np.ndarray, states: list, iterations=3):
-        self.observation_dict = {key: value for value, key in enumerate(np.unique(x))}
-        self.num_observations = len(self.observation_dict)
-        self.states_dict = {key: value for value, key in enumerate(states)}
-        self.num_states = len(states)
+        self.__transition_probability_ground_truth = self.__transition_probability.copy()
+        self.__emission_probabilities_ground_truth = self.__emission_probabilities.copy()
 
-        # Initilizing the two matrixes
+    def unsupervised_training(self, x: np.ndarray, states: list, iterations=3):
+        """
+        Mainly known as the Baum-Welch algorithm, used for the case where the states for each individual observation
+            is not known, thus we will follow a unsupervised approach, meaning with the list of the sequences and the
+            list of the states, the transition probabilities and emission probabilities will be calculated.
+        :param x: The list of the observations as one sequence
+        :param states: The list of the states
+        :param iterations: number of the iterations that the model should run
+        """
+        self.__fill_parameters(np.unique(x), np.array(states))
         self.__emission_probabilities = self.__uniform_probabilty_initilization((self.num_states, self.num_observations))
         self.__transition_probability = self.__uniform_probabilty_initilization((self.num_states, self.num_states))
-
-        seq_len = 10
-        sequences = []
-        for i in range(len(x) - seq_len+1):
-            sequences.append(x[i:i + seq_len])
-        sequences = np.asarray(sequences)
+        sequences = self.__build_sequences(x)
         num_sequences = len(sequences)
+        seq_len = len(sequences[0])
+        transition_costs = []
+        emission_costs = []
+
 
         for _ in tqdm(range(iterations)):
             gamma = np.zeros((self.num_states, seq_len, num_sequences))
@@ -116,30 +113,43 @@ class hmm:
                     self.__emission_probabilities[j, v] = np.sum(gamma[j,
                                                                        np.where(sequences == k)[1],
                                                                        np.where(sequences == k)[0]])
+            self.__emission_probabilities /= np.sum(gamma, axis=(-1, -2))[..., None]
 
-        print(self.__emission_probabilities)
-        print(self.__transition_probability)
+            # Normalizing the calculated probabilities
 
-    def viterbi(self, observation: list):
+            if self.__transition_probability_ground_truth is not None:
+                transition_costs.append(np.sum((self.__transition_probability_ground_truth - self.__transition_probability)**2))
+                emission_costs.append(np.sum((self.__emission_probabilities_ground_truth - self.__emission_probabilities)**2))
+
+        self.__transition_probability /= np.sum(self.__transition_probability, axis=-1)[..., None]
+        self.__emission_probabilities /= np.sum(self.__emission_probabilities, axis=-1)[..., None]
+
+        plt.subplot(121)
+        plt.plot(list(range(iterations)), transition_costs)
+        plt.title("MSE error for transition probabilities")
+        plt.subplot(122)
+        plt.plot(list(range(iterations)), emission_costs)
+        plt.title("MSE error for emission probabilities")
+        plt.show()
+
+    def viterbi(self, sequence: list):
         """
         The Viterbi algorithm used for decoding the given observation to the sequence of probable states
-        :param observation: The sequence of the observation as a list of the vocabs defined in the dataset
+        :param sequence: The sequence of the observation as a list of the vocabs defined in the dataset
         :return: Returns the set of the states as a list of the provided states.
         """
-        num_observation = len(observation)
-        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
+        seq_len = len(sequence)
+        numerical_observation = self.__convert_numerical(sequence, self.observation_dict)
 
-        back_track_matrix = np.zeros((self.num_states, num_observation), dtype=np.int)
-        probability_matrix = np.zeros((self.num_states, num_observation))
+        back_track_matrix = np.zeros((self.num_states, seq_len), dtype=np.int)
+        probability_matrix = np.zeros((self.num_states, seq_len))
 
         # Initilization
-        probability_matrix[:, 0] = self.__transition_probability[self.states_dict["__start__"], :] \
-                                   * self.__emission_probabilities[:, numerical_observation[0]]
-
+        probability_matrix[:, 0] = self.initial_distribution * self.__emission_probabilities[:, numerical_observation[0]]
         back_track_matrix[:, 0] = -1
 
         # Recursion
-        for i in range(1, len(observation)):
+        for i in range(1, len(sequence)):
             for next_state in range(self.num_states):
                 temp = np.zeros(self.num_states)
                 for initial_state in range(self.num_states):
@@ -151,32 +161,31 @@ class hmm:
                 back_track_matrix[next_state, i] = int(np.argmax(temp))
 
         # Termination and Decoding
-        states = np.zeros(len(observation), dtype=np.int)-1
-        states[-1] = np.argmax(probability_matrix[:, -1] *
-                               self.__transition_probability[:, self.states_dict["__end__"]])
-        for i in range(len(observation)-1, 0, -1):
+        states = np.zeros(len(sequence), dtype=np.int) - 1
+        states[-1] = np.argmax(probability_matrix[:, -1])
+        for i in range(len(sequence) - 1, 0, -1):
             states[i-1] = back_track_matrix[states[i], i]
 
         return self.__convert_states(states, self.states_dict)
 
-    def likelihood(self, observation: list):
+    def likelihood(self, sequence: list):
         """
         The likelihood algorithm used for calculating the likelihood of a provided sequence, this algorithm is in
             fact the forward algorithm which will be further used in  unsupervised_learning section.
-        :param observation: The sequence of the observation as a list of the vocabs defined in the dataset
+        :param sequence: The sequence of the observation as a list of the vocabs defined in the dataset
         :return: Returns the likelihood of the the provided sequence as a float number and the probability matrix
             which contains the alpha values
         """
-        num_observation = len(observation)
-        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
+        seq_len = len(sequence)
+        numerical_observation = self.__convert_numerical(sequence, self.observation_dict)
 
-        probability_matrix = np.zeros((self.num_states, num_observation))
+        probability_matrix = np.zeros((self.num_states, seq_len))
 
         # Initilization
         probability_matrix[:, 0] = self.initial_distribution * self.__emission_probabilities[:, numerical_observation[0]]
 
         # Recursion
-        for i in range(1, len(observation)):
+        for i in range(1, len(sequence)):
             for next_state in range(self.num_states):
                 temp = np.zeros(self.num_states)
                 for initial_state in range(self.num_states):
@@ -187,18 +196,22 @@ class hmm:
                 probability_matrix[next_state, i] = np.sum(temp)
 
         # Termination and calculating the likelihood
-        return np.sum(probability_matrix[:, -1])
+        return np.sum(probability_matrix[:, -1]), probability_matrix
 
-    def backward(self, observation: list):
-        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
-
-        probability_matrix = np.zeros((self.num_states, len(observation)))
+    def backward(self, sequence: list):
+        """
+        Backward algorithm which will be used in unsupervised learning (Baum-Welch) algorithm
+        :param sequence: The provided sequence which we will calculate the Beta probabilities for.
+        :return:
+        """
+        numerical_observation = self.__convert_numerical(sequence, self.observation_dict)
+        probability_matrix = np.zeros((self.num_states, len(sequence)))
 
         # Initilization
         probability_matrix[:, -1] = 1
 
         # Recursion
-        for i in range(len(observation)-2, -1, -1):
+        for i in range(len(sequence) - 2, -1, -1):
             for initial_state in range(self.num_states):
                 temp = np.zeros(self.num_states)
                 for next_state in range(self.num_states):
@@ -213,7 +226,22 @@ class hmm:
                                      * self.__emission_probabilities[:, numerical_observation[0]]
                                      * probability_matrix[:, 0]))
 
-        return backward_likelihood
+        return backward_likelihood, probability_matrix
+
+    def __fill_parameters(self, unique_observation: np.ndarray, unique_states: np.ndarray):
+        """
+        Used for filling the class parameters with the provided unique value for states and observation
+            This method is for object oriented purposes
+        :param unique_observation: The list of the unique observations
+        :param unique_states: The list of the unique states
+        """
+        self.observation_dict = {key: value for value, key in enumerate(sorted(unique_observation))}
+        self.num_observations = len(self.observation_dict)
+        self.states_dict = {key: value for value, key in enumerate(sorted(unique_states))}
+        self.num_states = len(states)
+        if self.initial_distribution is None:
+            self.initial_distribution = np.array([1 / self.num_states] * self.num_states)
+
 
     @staticmethod
     def __convert_states(numerical_sequence, dictionary):
@@ -250,6 +278,21 @@ class hmm:
         mat = np.random.uniform(0, 1, shape)
         return mat / np.sum(mat, axis=1)[..., None]
 
+    @staticmethod
+    def __build_sequences(x, seq_len: int = 10):
+        """
+        Used to convert the given one sequence to sequences with specific length using a sliding window
+        :param x: The provided input dataset
+        :param seq_len: The length of the desired sequences
+        :return: np.ndarray containing the sequences
+        """
+        sequences = []
+        for i in range(len(x) - seq_len + 1):
+            sequences.append(x[i:i + seq_len])
+        return  np.asarray(sequences)
+
+    def __str__(self):
+        return f"{self.__transition_probability} \n {self.__emission_probabilities}"
 
 
 if __name__ == '__main__':
@@ -261,10 +304,19 @@ if __name__ == '__main__':
     dataset = np.array(list(map(fix_data, lines)), dtype=object)
     states = ["foggy", "rainy", "sunny"]
     my_model = hmm()
-    # my_model.unsupervised_training(dataset[:, 1], states, iterations=30)
     my_model.supervised_training(dataset[:, 1], dataset[:, 0])
-    print(my_model.likelihood(["no"]))
-    print(my_model.backward(["yes"]))
+    print(my_model)
+
+    my_model.unsupervised_training(dataset[:, 1], states, iterations=40)
+    print(my_model)
+
+
+
+
+
+    # print(my_model.likelihood(["no"])[0])
+    # print(my_model.backward(["yes"])[0])
+    # print(my_model.viterbi(["no", "no", "no", "no"]))
     # print(my_model.backward(["no", "yes"]))
 
 
