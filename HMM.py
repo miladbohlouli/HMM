@@ -4,19 +4,17 @@ from tqdm import tqdm
 np.set_printoptions(precision=4, suppress=True)
 
 class hmm:
-    def __init__(self, states: list):
+    def __init__(self):
         """
         The constructor of the hmm class
         :param states: These are the set of the possible states
         """
         # Converting the states to integers
-        states.append("__end__")
-        states.insert(0, "__start__")
-        self.states_dict = {key: value for value, key in enumerate(states)}
+
+        self.states_dict = {}
         self.observation_dict = {}
         self.bigram_states_dictionary = {}
-        self.unigram_states_dictionary = {}
-        self.num_states = len(states)
+        self.num_states = None
         self.num_observations = None
         self.__transition_probability = None
         self.__emission_probabilities = None
@@ -29,12 +27,16 @@ class hmm:
         :param x: The observations in the dataset defined as predictor variables
         :param y: The states in the dataset defined as the labels
         """
+        states = np.append(np.insert(np.unique(y), 0, "__start__"), "__end__")
         self.observation_dict = {key: value for value, key in enumerate(np.unique(x))}
+        self.num_states = len(states)
+        self.states_dict = {key: value for value, key in enumerate(states)}
         self.num_observations = len(self.observation_dict)
+
         self.__emission_probabilities = np.zeros((self.num_states, self.num_observations))
         self.__transition_probability = np.zeros((self.num_states, self.num_states))
-        numerical_x = self.convert_numerical(x, self.observation_dict)
-        numerical_y = self.convert_numerical(y, self.states_dict)
+        numerical_x = self.__convert_numerical(x, self.observation_dict)
+        numerical_y = self.__convert_numerical(y, self.states_dict)
         x = []
         y = []
 
@@ -67,34 +69,55 @@ class hmm:
                 self.__emission_probabilities[i, j] = np.sum(np.logical_and(x == j, y[:, 1:-1] == i)) / np.sum(y == i)
 
     # Todo:
-    def unsupervised_training(self, x: np.ndarray, iterations=10):
+    def unsupervised_training(self, x: np.ndarray, states: list, iterations=3):
         self.observation_dict = {key: value for value, key in enumerate(np.unique(x))}
         self.num_observations = len(self.observation_dict)
-        x = self.convert_numerical(x, self.observation_dict)
-        seq_len = len(x)
+        self.states_dict = {key: value for value, key in enumerate(states)}
+        self.num_states = len(states)
 
         # Initilizing the two matrixes
-        self.__emission_probabilities = np.random.normal(0, 1, (self.num_states, self.num_observations))
-        self.__transition_probability = np.random.normal(0, 1, (self.num_states, self.num_states))
+        self.__emission_probabilities = self.__uniform_probabilty_initilization((self.num_states, self.num_observations))
+        self.__transition_probability = self.__uniform_probabilty_initilization((self.num_states, self.num_states))
 
-
+        seq_len = 10
+        sequences = []
+        for i in range(len(x) - seq_len+1):
+            sequences.append(x[i:i + seq_len])
+        sequences = np.asarray(sequences)
+        num_sequences = len(sequences)
 
         for _ in tqdm(range(iterations)):
-            gamma = np.zeros((self.num_states, seq_len))
-            zai = np.zeros((self.num_states, self.num_states, seq_len))
-
-            # For computation relaxation construct the backward probability matrix and forward probability matrix
-            alpha = self.likelihood()
-            zai = np.zeros((self.num_states, seq_len))
+            gamma = np.zeros((self.num_states, seq_len, num_sequences))
+            zai = np.zeros((self.num_states, self.num_states, seq_len-1, num_sequences))
 
             # Expectation step
-            for t in range(seq_len):
-                
+            for seq_num, seq in enumerate(sequences):
+                likelihood, alpha = self.likelihood(seq)
+                _, beta = self.backward(seq)
 
+                gamma[..., seq_num] = (alpha * beta) / np.sum(alpha * beta, axis=0)
 
+                for i in range(self.num_states):
+                    for j in range(self.num_states):
+                        for t in range(seq_len-1):
+                            zai[i, j, t, seq_num] = alpha[i, t] \
+                                                    * self.__transition_probability[i, j] \
+                                                    * self.__emission_probabilities[j, self.observation_dict[seq[t]]] \
+                                                    * beta[j, t+1]
+
+                zai[..., seq_num] /= likelihood
 
             # Maximization step
+            self.__transition_probability = np.sum(zai, axis=(-1, -2)) / np.sum(zai, axis=(-1, -2, -3))
 
+            for k, v in self.observation_dict.items():
+                for j in range(self.num_states):
+                    self.__emission_probabilities[j, v] = np.sum(gamma[j,
+                                                                       np.where(sequences == k)[1],
+                                                                       np.where(sequences == k)[0]])
+
+        print(self.__emission_probabilities)
+        print(self.__transition_probability)
 
     def viterbi(self, observation: list):
         """
@@ -103,7 +126,7 @@ class hmm:
         :return: Returns the set of the states as a list of the provided states.
         """
         num_observation = len(observation)
-        numerical_observation = self.convert_numerical(observation, self.observation_dict)
+        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
 
         back_track_matrix = np.zeros((self.num_states, num_observation), dtype=np.int)
         probability_matrix = np.zeros((self.num_states, num_observation))
@@ -133,7 +156,7 @@ class hmm:
         for i in range(len(observation)-1, 0, -1):
             states[i-1] = back_track_matrix[states[i], i]
 
-        return self.convert_states(states, self.states_dict)
+        return self.__convert_states(states, self.states_dict)
 
     def likelihood(self, observation: list):
         """
@@ -144,7 +167,7 @@ class hmm:
             which contains the alpha values
         """
         num_observation = len(observation)
-        numerical_observation = self.convert_numerical(observation, self.observation_dict)
+        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
 
         probability_matrix = np.zeros((self.num_states, num_observation))
 
@@ -168,7 +191,7 @@ class hmm:
                probability_matrix
 
     def backward(self, observation: list):
-        numerical_observation = self.convert_numerical(observation, self.observation_dict)
+        numerical_observation = self.__convert_numerical(observation, self.observation_dict)
 
         probability_matrix = np.zeros((self.num_states, len(observation)))
 
@@ -194,7 +217,7 @@ class hmm:
         return backward_likelihood, probability_matrix
 
     @staticmethod
-    def convert_states(numerical_sequence, dictionary):
+    def __convert_states(numerical_sequence, dictionary):
         """
         Used to convert a numerical numerical sequence to a sequence in terms of states. Since the states and the
         observations have been converted to numerical values, this step is necessary.
@@ -209,7 +232,7 @@ class hmm:
         return result
 
     @staticmethod
-    def convert_numerical(x, dictionary):
+    def __convert_numerical(x, dictionary):
         """
         Convert a sequence of observations into numerical values provided as values in dictionary
         :param x: The sequence
@@ -217,6 +240,12 @@ class hmm:
         :return: The converted numerical sequence
         """
         return np.array(list(map(lambda x: dictionary[x], x)))
+
+    @staticmethod
+    def __uniform_probabilty_initilization(shape: tuple):
+        mat = np.random.uniform(0, 1, shape)
+        return mat / np.sum(mat, axis=1)[..., None]
+
 
 
 if __name__ == '__main__':
@@ -227,11 +256,11 @@ if __name__ == '__main__':
     fix_data = lambda line: line.strip().replace('\n', "").split(",")
     dataset = np.array(list(map(fix_data, lines)), dtype=object)
     states = ["foggy", "rainy", "sunny"]
-    my_model = hmm(states)
-    # my_model.unsupervised_training(dataset[:, 1])
-    my_model.supervised_training(dataset[:, 1], dataset[:, 0])
-    print(my_model.likelihood(["no", "yes"]))
-    print(my_model.backward(["no", "yes"]))
+    my_model = hmm()
+    my_model.unsupervised_training(dataset[:, 1], states, iterations=30)
+    # my_model.supervised_training(dataset[:, 1], dataset[:, 0])
+    # print(my_model.likelihood(["yes"]))
+    # print(my_model.backward(["no", "yes"]))
 
 
 
