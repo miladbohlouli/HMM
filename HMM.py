@@ -4,14 +4,15 @@ from tqdm import tqdm
 from matplotlib import pyplot as plt
 import seaborn as sns
 sns.set(color_codes=True)
-
 np.set_printoptions(precision=4, suppress=True)
+from IPython.display import display
+import pandas as pd
 
 class hmm:
     def __init__(self, initial_distribution:list = None):
         """
         The constructor of the hmm class
-        :param initial_distribution: The initial_distribution for the given inputss
+        :param initial_distribution: The initial_distribution for the given inputs
         """
         self.states_dict = {}
         self.observation_dict = {}
@@ -75,38 +76,41 @@ class hmm:
         :param iterations: number of the iterations that the model should run
         """
         self.__fill_parameters(np.unique(x), np.array(states))
-        self.__emission_probabilities = self.__uniform_probabilty_initilization((self.num_states, self.num_observations))
-        self.__transition_probability = self.__uniform_probabilty_initilization((self.num_states, self.num_states))
+        self.__emission_probabilities = self.__uniform_probability_initilization((self.num_states, self.num_observations))
+        self.__transition_probability = self.__uniform_probability_initilization((self.num_states, self.num_states))
         sequences = self.__build_sequences(x)
         num_sequences = len(sequences)
         seq_len = len(sequences[0])
         transition_costs = []
         emission_costs = []
-
+        costs = []
 
         for _ in tqdm(range(iterations)):
             gamma = np.zeros((self.num_states, seq_len, num_sequences))
-            zai = np.zeros((self.num_states, self.num_states, seq_len-1, num_sequences))
+            zai = np.zeros((self.num_states, self.num_states, seq_len - 1, num_sequences))
 
             # Expectation step
             for seq_num, seq in enumerate(sequences):
-                likelihood, alpha = self.likelihood(seq)
+                _, alpha = self.likelihood(seq)
                 _, beta = self.backward(seq)
 
                 gamma[..., seq_num] = (alpha * beta) / np.sum(alpha * beta, axis=0)
+                sum = np.zeros(seq_len - 1)
+                for t in range(seq_len - 1):
+                    for i in range(self.num_states):
+                        for j in range(self.num_states):
+                            temp = alpha[i, t] * \
+                                   self.__transition_probability[i, j] * \
+                                   self.__emission_probabilities[j, self.observation_dict[seq[t + 1]]] * \
+                                   beta[j, t + 1]
+                            zai[i, j, t, seq_num] = temp
+                            sum[t] += temp
 
-                for i in range(self.num_states):
-                    for j in range(self.num_states):
-                        for t in range(seq_len-1):
-                            zai[i, j, t, seq_num] = alpha[i, t] \
-                                                    * self.__transition_probability[i, j] \
-                                                    * self.__emission_probabilities[j, self.observation_dict[seq[t]]] \
-                                                    * beta[j, t+1]
-
-                zai[..., seq_num] /= likelihood
+                # zai[..., seq_num] /= np.sum(zai[..., seq_num], axis=(0, 1))[None, ...]
+                zai[..., seq_num] /= sum
 
             # Maximization step
-            self.__transition_probability = np.sum(zai, axis=(-1, -2)) / np.sum(zai, axis=(-1, -2, -3))
+            self.__transition_probability = np.sum(zai, axis=(-1, -2)) / np.sum(gamma[:, :-1, :], axis=(-1, -2))[..., None]
 
             for k, v in self.observation_dict.items():
                 for j in range(self.num_states):
@@ -116,20 +120,26 @@ class hmm:
             self.__emission_probabilities /= np.sum(gamma, axis=(-1, -2))[..., None]
 
             # Normalizing the calculated probabilities
+            self.__transition_probability /= np.sum(self.__transition_probability, axis=-1)[..., None]
+            self.__emission_probabilities /= np.sum(self.__emission_probabilities, axis=-1)[..., None]
 
+            costs.append(np.sum(np.log(self.__transition_probability)))
             if self.__transition_probability_ground_truth is not None:
                 transition_costs.append(np.sum((self.__transition_probability_ground_truth - self.__transition_probability)**2))
                 emission_costs.append(np.sum((self.__emission_probabilities_ground_truth - self.__emission_probabilities)**2))
 
-        self.__transition_probability /= np.sum(self.__transition_probability, axis=-1)[..., None]
-        self.__emission_probabilities /= np.sum(self.__emission_probabilities, axis=-1)[..., None]
+        if self.__transition_probability_ground_truth is not None:
+            plt.figure(figsize=[10, 5])
+            plt.subplot(121)
+            plt.plot(list(range(iterations)), transition_costs, "r", alpha=True)
+            plt.title("MSE error for transition probabilities")
+            plt.subplot(122)
+            plt.plot(list(range(iterations)), emission_costs, "r", alpha=True)
+            plt.title("MSE error for emission probabilities")
+            plt.show()
 
-        plt.subplot(121)
-        plt.plot(list(range(iterations)), transition_costs)
-        plt.title("MSE error for transition probabilities")
-        plt.subplot(122)
-        plt.plot(list(range(iterations)), emission_costs)
-        plt.title("MSE error for emission probabilities")
+        plt.figure(figsize=[5, 5])
+        plt.plot(list(range(iterations)), costs, "r", alpha=True)
         plt.show()
 
     def viterbi(self, sequence: list):
@@ -202,7 +212,7 @@ class hmm:
         """
         Backward algorithm which will be used in unsupervised learning (Baum-Welch) algorithm
         :param sequence: The provided sequence which we will calculate the Beta probabilities for.
-        :return:
+        :return: It calculates the backward probabilities for the provided sequence
         """
         numerical_observation = self.__convert_numerical(sequence, self.observation_dict)
         probability_matrix = np.zeros((self.num_states, len(sequence)))
@@ -238,7 +248,7 @@ class hmm:
         self.observation_dict = {key: value for value, key in enumerate(sorted(unique_observation))}
         self.num_observations = len(self.observation_dict)
         self.states_dict = {key: value for value, key in enumerate(sorted(unique_states))}
-        self.num_states = len(states)
+        self.num_states = len(self.states_dict)
         if self.initial_distribution is None:
             self.initial_distribution = np.array([1 / self.num_states] * self.num_states)
 
@@ -269,13 +279,14 @@ class hmm:
         return np.array(list(map(lambda x: dictionary[x], x)))
 
     @staticmethod
-    def __uniform_probabilty_initilization(shape: tuple):
+    def __uniform_probability_initilization(shape: tuple):
         """
         Given a shape it constructs a matrix with the same shape that its sum along second axis will be 1
         :param shape: The shape of the matrix
         :return: The probability matrix
         """
-        mat = np.random.uniform(0, 1, shape)
+        # np.random.seed(10)
+        mat = np.random.random(shape)
         return mat / np.sum(mat, axis=1)[..., None]
 
     @staticmethod
@@ -289,10 +300,12 @@ class hmm:
         sequences = []
         for i in range(len(x) - seq_len + 1):
             sequences.append(x[i:i + seq_len])
-        return  np.asarray(sequences)
+        return np.asarray(sequences)
 
     def __str__(self):
-        return f"{self.__transition_probability} \n {self.__emission_probabilities}"
+        display(pd.DataFrame(self.__transition_probability, index=self.states_dict.keys(), columns=self.states_dict.keys()))
+        display(pd.DataFrame(self.__emission_probabilities, index=self.states_dict.keys(), columns=self.observation_dict.keys()))
+        return ""
 
 
 if __name__ == '__main__':
@@ -304,22 +317,11 @@ if __name__ == '__main__':
     dataset = np.array(list(map(fix_data, lines)), dtype=object)
     states = ["foggy", "rainy", "sunny"]
     my_model = hmm()
+
     my_model.supervised_training(dataset[:, 1], dataset[:, 0])
     print(my_model)
 
-    my_model.unsupervised_training(dataset[:, 1], states, iterations=40)
+    my_model.unsupervised_training(dataset[:, 1], states, iterations=50)
     print(my_model)
-
-
-
-
-
-    # print(my_model.likelihood(["no"])[0])
-    # print(my_model.backward(["yes"])[0])
-    # print(my_model.viterbi(["no", "no", "no", "no"]))
-    # print(my_model.backward(["no", "yes"]))
-
-
-
 
 
